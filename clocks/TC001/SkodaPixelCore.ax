@@ -1,0 +1,238 @@
+# @name Skoda Pixel Core
+# @desc Gemeinsamer Zeichencode fuer mehrere Skoda-Pixel-Anzeigen.
+# @module SkodaPixelCoreTC001
+# @author Q14siX
+# @version 20261113.234847
+# @display 32x8
+
+import json
+
+class SkodaPixel
+  var spec, row, seen, started, source, row_key, revision
+  var issue, issue_color, source_error, demo, local_demo, animate, fetch_epoch
+  var stale_minutes, stale, age_unknown, value, ink, bar, motion, accent, empty
+  var brand_small, value_width
+
+  def init()
+    var specs = [["battery","Akku","AKKU","percent","battery"],["range","E-Reichweite","E-RANGE","meters","road"],["charging","Ladestatus","LADEN","charge","bolt"],["power","Ladeleistung","LEIST.","power","bolt"],["speed","Ladetempo","TEMPO","speed","road"],["remaining","Restladezeit","RESTZEIT","minutes","clock"],["target","Ladeziel","LADEZIEL","percent","target"],["cable","Ladekabel","KABEL","plug","plug"],["cablelock","Kabelschloss","K-LOCK","cablelock","key"],["locked","Verriegelung","SCHLOSS","locked","lock"],["doors","Tueren","TUEREN","open","door"],["windows","Fenster","FENSTER","open","window"],["roof","Schiebedach","DACH","open","roof"],["trunk","Kofferraum","HECK","open","trunk"],["bonnet","Motorhaube","HAUBE","open","bonnet"],["lights","Licht","LICHT","on","light"],["odometer","Kilometerstand","GES-KM","km","car"],["climate","Klima","KLIMA","climate","fan"],["temperature","Solltemperatur","SOLL","temperature","thermo"],["fuel","Tank","TANK","fuel","fuel"],["totalrange","Gesamtreichweite","GESAMT","km","range"],["adblue","AdBlue","ADBLUE","km","drop"],["parking","Parkstatus","PARKEN","parking","park"],["heater","Standheizung","HEIZUNG","heater","heat"],["ventilation","Lueftung","LUEFTUNG","vent","wind"],["frontheat","Frontscheibenheizung","VORN HZ","on","frontheat"],["rearheat","Heckscheibenheizung","HECK HZ","on","rearheat"]]
+    self.brand_small = [7927206,0,7927206,0,0,0,0,0,7927206,0,0,0,0,0,0,0,0,0,0,0,0,7927206,7927206,7927206,0,7927206,0,7927206,7927206,0,0,0,7927206,0,7927206,7927206,7927206,7927206,0,7927206,7927206,0,0,0,7927206,0,7927206,0,7927206,7927206,7927206,7927206,0,7927206,0,7927206]
+    self.accent = store.get('accent',0x78F5A6)
+    self.local_demo = store.get('demo',false)
+    self.demo = self.local_demo
+    self.animate = store.get('animation',true)
+    self.stale_minutes = int(clamp(store.get('stale',60),10,1440))
+    self.empty = ['--',0x758590,-1,0,-1,false,false]
+    self.row = self.empty
+    self.source = store.get('source','SkodaData')
+    if type(self.source) != 'string' || size(self.source) == 0 self.source = 'SkodaData' end
+    var view = store.get('view','Akku')
+    var migrated = {'Rotation':'Akku','Cockpit':'Akku','Lade-Cockpit':'Ladeleistung','Zugang':'Verriegelung','Klima-Cockpit':'Klima'}.find(view)
+    if migrated != nil
+      view = migrated
+      store.set('view',view)
+    end
+    var page = 0
+    for i : 0 .. size(specs)-1
+      if specs[i][1] == view page = i end
+    end
+    self.spec = specs[page]
+    self.row_key = self.source + '.row_' + self.spec[0]
+    self.revision = nil
+    self.fetch_epoch = -1
+    self.issue = 'WARTEN'
+    self.issue_color = 0xFFBC55
+    self.source_error = false
+    self.seen = false
+    self.started = now_ms()
+    self.value = '--'
+    self.ink = self.accent
+    self.bar = -1
+    self.motion = 0
+    self.stale = false
+    self.age_unknown = true
+    self.value_width = 7
+    if self.local_demo
+      var examples = [["72%",7927206,72,1,1794556800,true,true],["312km",6475775,-1,3,1794556800,true,false],["LAEDT",7927206,-1,1,1794556800,true,true],["11kW",16759893,-1,1,1794556800,true,false],["58km/h",6475775,-1,3,1794556800,true,false],["36m",16759893,-1,0,1794556800,true,false],["80%",7927206,80,0,1794556800,true,true],["DRAN",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["ZU",7927206,-1,0,1794556800,true,true],["AUS",6475775,-1,0,1794556800,true,false],["12845km",6475775,-1,0,1794556800,true,false],["HEIZT",16759893,-1,2,1794556800,true,false],["22°C",6475775,-1,0,1794556800,true,false],["68%",7927206,68,0,1794556800,true,true],["640km",6475775,-1,0,1794556800,true,false],["5200km",6475775,-1,0,1794556800,true,false],["PARKT",7927206,-1,0,-1,true,true],["HEIZT",16759893,-1,2,1794556800,true,false],["LUEFTET",6475775,-1,2,1794556800,true,false],["AN",16759893,-1,1,1794556800,true,false],["AUS",6475775,-1,0,1794556800,true,false]]
+      self.row = examples[page]
+      examples = nil
+      var now = epoch_ms()
+      self.fetch_epoch = now > 0 ? now/1000 : -1
+      if self.row[4] >= 0 self.row[4] = self.fetch_epoch-240 end
+      self.seen = true
+      self.issue = ''
+      self.apply_row()
+    end
+  end
+
+  def setup()
+    self.loop()
+  end
+
+  def loop()
+    if self.local_demo
+      self.data_age()
+      return
+    end
+    var alive = shared.age(self.source+'.alive')
+    if alive == nil || alive > 10000
+      self.issue = alive == nil ? 'QUELLE?' : 'QUELLE ALT'
+      self.issue_color = 0xFFBC55
+      self.source_error = true
+      self.revision = nil
+      return
+    end
+    self.issue_color = 0xFFBC55
+    var schema = shared.get(self.source+'.schema')
+    if type(schema) != 'int' || schema != 1
+      self.issue = 'DATEN?'
+      self.revision = nil
+      return
+    end
+    # Status kann sich ohne neue Fahrzeugdaten und ohne neue Revision aendern.
+    var problem = shared.get(self.source+'.issue')
+    if type(problem) != 'string' || size(problem) > 48 problem = 'DATEN?' end
+    var tint = shared.get(self.source+'.issue_color')
+    if type(tint) == 'int' && tint >= 0 && tint <= 0xFFFFFF self.issue_color = tint end
+    self.demo = shared.get(self.source+'.demo') == true
+    self.source_error = problem != ''
+    var ready = shared.get(self.source+'.ready')
+    if type(ready) != 'bool'
+      self.issue = 'DATEN?'
+      self.revision = nil
+      return
+    end
+    if !ready
+      self.row = self.empty
+      self.seen = false
+      self.issue = problem == '' ? 'WARTEN' : problem
+      self.revision = nil
+      return
+    end
+    var revision = shared.get(self.source+'.revision')
+    if type(revision) != 'int'
+      self.issue = 'WARTEN'
+      self.revision = nil
+      return
+    end
+    if revision != self.revision || !self.seen
+      try
+        var raw = shared.get(self.row_key)
+        if type(raw) != 'string' || size(raw) > 1024 raise 'value_error','row' end
+        var r = json.load(raw)
+        raw = nil
+        if !isinstance(r,list) || size(r) != 7 raise 'value_error','row' end
+        if type(r[0]) != 'string' || size(r[0]) > 128 raise 'value_error','text' end
+        if type(r[1]) != 'int' || r[1] < 0 || r[1] > 0xFFFFFF raise 'value_error','color' end
+        if (type(r[2]) != 'int' && type(r[2]) != 'real') || r[2] != r[2] || r[2] < -1 || r[2] > 100 raise 'value_error','percent' end
+        if type(r[3]) != 'int' || r[3] < 0 || r[3] > 3 raise 'value_error','motion' end
+        if (type(r[4]) != 'int' && type(r[4]) != 'real') || r[4] != r[4] raise 'value_error','timestamp' end
+        if type(r[5]) != 'bool' || type(r[6]) != 'bool' raise 'value_error','flags' end
+        self.row = r[5] ? r : self.empty
+        var fetched = shared.get(self.source+'.fetch_epoch')
+        self.fetch_epoch = (type(fetched) == 'int' || type(fetched) == 'real') && fetched == fetched ? fetched : -1
+        self.seen = true
+        self.apply_row()
+        self.revision = revision
+      except ..
+        self.issue = 'DATEN?'
+        self.issue_color = 0xFFBC55
+        return
+      end
+    end
+    self.issue = !self.row[5] && problem != '' ? problem : ''
+    if self.seen self.data_age() end
+  end
+
+  def data_age()
+    var r = self.row
+    var now = epoch_ms()/1000
+    var captured_bad = !r[5] || r[4] < 0 || now <= 0 || r[4] > now+300
+    var source_bad = self.fetch_epoch <= 0 || now <= 0 || self.fetch_epoch > now+300
+    self.age_unknown = captured_bad || source_bad || (!source_bad && r[4] > self.fetch_epoch+300)
+    self.stale = (!captured_bad && now-r[4] > self.stale_minutes*60) || (!source_bad && now-self.fetch_epoch > self.stale_minutes*60)
+  end
+
+  def apply_row()
+    var row = self.row
+    if self.value != row[0] self.started = now_ms() end
+    self.value = row[0]
+    self.ink = row[6] ? self.accent : row[1]
+    self.bar = row[2]
+    var fmt = self.spec[3]
+    self.motion = (fmt == 'charge' || fmt == 'climate' || fmt == 'heater' || fmt == 'vent' || fmt == 'on' || fmt == 'parking') ? row[3] : 0
+    font('small')
+    self.value_width = max(0,text_ink_width(self.value))
+    self.data_age()
+  end
+
+  def on_show()
+    self.started = now_ms()
+  end
+
+  # Klare 7x8 SK-Kurzmarke mit abgesetztem Hatschek; breite Werte erhalten die volle Matrix.
+  def brand()
+    var dim = self.animate && self.motion > 0 && int(now_ms()/350)%2 == 1
+    for i : 0 .. 55
+      var c = self.brand_small[i]
+      if c != 0
+        if dim c = rgb(((c>>16)&255)*3/5,((c>>8)&255)*3/5,(c&255)*3/5) end
+        pixel(i%7,i/7,c)
+      end
+    end
+  end
+
+  # Nur ueberbreite einzelne Werte laufen; kein Wechsel zu einer anderen Information.
+  def wide_text(value, color)
+    var w = text_ink_width(value)
+    if w <= 32
+      text((32-w)/2,6,value,color)
+      return
+    end
+    var travel = (w-32)*80
+    var elapsed = (now_ms()-self.started) % (4000+2*travel)
+    var offset = 0
+    if elapsed >= 2000 && elapsed < 2000+travel
+      offset = (elapsed-2000)/80
+    elif elapsed >= 2000+travel && elapsed < 4000+travel
+      offset = w-32
+    elif elapsed >= 4000+travel
+      offset = w-32-(elapsed-4000-travel)/80
+    end
+    text(-offset,6,value,color)
+  end
+
+  def draw()
+    clear()
+    font('small')
+    if self.issue != ''
+      self.wide_text(self.issue,self.issue_color)
+      return
+    end
+    var compact = self.value_width <= 24
+    if compact
+      self.brand()
+      text(8+(24-self.value_width)/2,6,self.value,self.ink)
+    else
+      self.wide_text(self.value,self.ink)
+    end
+    if self.bar >= 0
+      line(8,7,30,7,0x123126)
+      var filled = int(23*self.bar/100+0.5)
+      if filled > 0 line(8,7,8+filled-1,7,self.ink) end
+    end
+    if self.stale
+      for x : (compact ? 8 : 0) .. 30
+        if x%2 == 0 pixel(x,7,0xFFBC55) end
+      end
+    end
+    if self.source_error
+      pixel(29,7,0xFFBC55)
+      pixel(30,7,0xFFBC55)
+    end
+    if self.age_unknown pixel(31,7,0xFFBC55) end
+  end
+end
+
+var exports = module('SkodaPixelCoreTC001')
+exports.create = SkodaPixel
+return exports

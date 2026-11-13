@@ -1,0 +1,383 @@
+# @name SkodaData
+# @desc Gemeinsame Skoda-Daten fuer alle Pixel-Anzeigen auf dieser Uhr.
+# @headless true
+# @author Q14siX
+# @version 20261113.234847
+# @display 32x8
+# @config vin text "Fahrgestellnummer (VIN)" maxlen=17 group="Verbindung"
+# @config poll number "Abrufintervall je Uhr" default=60 min=10 max=1440 unit=min group="Verbindung"
+# @config demo bool "Vorschau mit Beispieldaten" default=false group="Vorschau"
+# @config api_key text "Skoda API-Key" maxlen=512 group="Verbindung"
+
+import json
+import string
+import gc
+
+
+# Ein einziger Datenanbieter je Uhr/VIN; Anzeigen lesen ausschliesslich Shared.
+class SkodaData
+  var specs, words, rows, empty, accent, demo, vin, key, url
+  var interval, deadline, clock_ready, busy, blocked, issue, issue_color
+  var seen, published, fetch_epoch, revision
+
+  def init()
+    self.specs = [["battery","Akku","AKKU","charging","status.battery.stateOfChargeInPercent","percent","battery",true],["range","E-Reichweite","E-RANGE","charging","status.battery.remainingCruisingRangeInMeters","meters","road",true],["charging","Ladestatus","LADEN","charging","status.state","charge","bolt",true],["power","Ladeleistung","LEIST.","charging","status.chargePowerInKw","power","bolt",true],["speed","Ladetempo","TEMPO","charging","status.chargingRateInKilometersPerHour","speed","road",false],["remaining","Restladezeit","RESTZEIT","charging","status.remainingTimeToFullyChargedInMinutes","minutes","clock",false],["target","Ladeziel","LADEZIEL","charging","settings.targetStateOfChargeInPercent","percent","target",false],["cable","Ladekabel","KABEL","charging","status.plugConnectionState","plug","plug",false],["cablelock","Kabelschloss","K-LOCK","charging","status.plugLockState","cablelock","key",false],["locked","Verriegelung","SCHLOSS","status","overall.doorsLocked","locked","lock",true],["doors","Tueren","TUEREN","status","overall.doors","open","door",false],["windows","Fenster","FENSTER","status","overall.windows","open","window",false],["roof","Schiebedach","DACH","status","detail.sunroof","open","roof",false],["trunk","Kofferraum","HECK","status","detail.trunk","open","trunk",false],["bonnet","Motorhaube","HAUBE","status","detail.bonnet","open","bonnet",false],["lights","Licht","LICHT","status","overall.lights","on","light",false],["odometer","Kilometerstand","GES-KM","odometer","mileageInKm","km","car",false],["climate","Klima","KLIMA","airConditioning","state","climate","fan",true],["temperature","Solltemperatur","SOLL","airConditioning","targetTemperature.value","temperature","thermo",false],["fuel","Tank","TANK","fuelStatus","primaryEngineRange.currentFuelLevelInPercent","fuel","fuel",false],["totalrange","Gesamtreichweite","GESAMT","fuelStatus","totalRangeInKm","km","range",false],["adblue","AdBlue","ADBLUE","fuelStatus","adBlueRange","km","drop",false],["parking","Parkstatus","PARKEN","parkingPosition","state","parking","park",false],["heater","Standheizung","HEIZUNG","auxiliaryHeating","state","heater","heat",false],["ventilation","Lueftung","LUEFTUNG","activeVentilation","state","vent","wind",false],["frontheat","Frontscheibenheizung","VORN HZ","airConditioning","windowHeating.front","on","frontheat",false],["rearheat","Heckscheibenheizung","HECK HZ","airConditioning","windowHeating.rear","on","rearheat",false]]
+    self.words = {
+      'charge': {'CONNECT_CABLE':['KABEL',2,0], 'CHARGING':['LAEDT',0,1], 'CONSERVING':['ERHALT',0,1], 'READY_FOR_CHARGING':['BEREIT',1,0], 'DISCHARGING':['ENTLAEDT',2,1], 'CHARGING_INTERRUPTED':['PAUSE',2,0]},
+      'plug': {'CONNECTED':['DRAN',0,0], 'DISCONNECTED':['AB',1,0]},
+      'cablelock': {'LOCKED':['ZU',0,0], 'UNLOCKED':['OFFEN',2,0]},
+      'locked': {'YES':['ZU',0,0], 'NO':['OFFEN',3,0], 'OPENED':['OFFEN',3,0], 'TRUNK_OPENED':['HECK',3,0]},
+      'open': {'OPEN':['OFFEN',3,0], 'CLOSED':['ZU',0,0]},
+      'on': {'ON':['AN',2,1], 'OFF':['AUS',1,0]},
+      'climate': {'OFF':['AUS',1,0], 'COOLING':['KUEHLT',1,2], 'HEATING':['HEIZT',2,2], 'HEATING_AUXILIARY':['HEIZT',2,2], 'VENTILATION':['LUEFTET',1,2], 'COMPLETED':['FERTIG',0,0]},
+      'parking': {'PARKED':['PARKT',0,0], 'IN_MOTION':['FAEHRT',1,3]},
+      'heater': {'OFF':['AUS',1,0], 'PREHEATING':['WAERMT',2,2], 'HEATING_AUXILIARY':['HEIZT',2,2], 'VENTILATION':['LUEFTET',1,2]},
+      'vent': {'OFF':['AUS',1,0], 'PREHEATING':['WAERMT',2,2], 'VENTILATION':['LUEFTET',1,2]}
+    }
+    self.accent = 0x78F5A6
+    self.demo = store.get('demo', false)
+    self.interval = int(clamp(store.get('poll', 60), 10, 1440)) * 60
+    self.vin = string.toupper(string.replace(store.get('vin', ''), ' ', ''))
+    self.key = store.get('api_key', '')
+    self.rows = []
+    self.empty = ['--',0x758590,-1,0,-1,false,false]
+    var parts = []
+    for s : self.specs
+      self.rows.push(self.empty)
+      if parts.find(s[3]) == nil parts.push(s[3]) end
+    end
+    self.url = 'https://public.api.connect.skoda-auto.cz/api/v1/vehicles/' + self.vin + '?include=' + parts.concat(',')
+    self.busy = false
+    self.blocked = false
+    self.issue = 'LADEN'
+    self.issue_color = 0x62CFFF
+    self.seen = false
+    self.published = false
+    self.fetch_epoch = -1
+    self.revision = store.get('_revision', 0)
+    if type(self.revision) != 'int' || self.revision < 0 self.revision = 0 end
+    self.deadline = 0
+    self.clock_ready = false
+    self.restore_deadline()
+    if size(self.specs) != 27
+      self.issue = 'DATEN?'
+      self.issue_color = 0xFFBC55
+      self.blocked = true
+    elif !self.demo
+      if size(self.vin) != 17 || re.search('^[A-HJ-NPR-Z0-9]+$', self.vin) == nil
+        self.issue = 'VIN?'
+        self.issue_color = 0xFFBC55
+        self.blocked = true
+      elif !(size(self.key) > 0)
+        self.issue = 'API-KEY'
+        self.issue_color = 0xFFBC55
+      elif !self.clock_ready
+        self.issue = 'ZEIT?'
+        self.issue_color = 0xFFBC55
+      elif self.deadline > now_ms()
+        self.issue = 'WARTEN'
+      end
+    end
+    # Die ersten 27 Records alter TC002-Caches entsprechen den Einzelansichten.
+    if !self.demo && !self.blocked && store.get('_cache_vin', '') == self.vin
+      var cached = store.get('_rows')
+      if isinstance(cached, list) && (size(cached) == 27 || size(cached) == 31)
+        var good = true
+        for i : 0 .. 26
+          if !self.valid_row(cached[i]) good = false break end
+        end
+        if good
+          self.rows = []
+          for i : 0 .. 26
+            var r = cached[i]
+            if r[6] r[1] = self.accent end
+            self.rows.push(r)
+          end
+          self.fetch_epoch = store.get('_fetch_epoch', -1)
+          if type(self.fetch_epoch) != 'int' self.fetch_epoch = -1 end
+          self.seen = true
+          if self.issue == 'LADEN' || self.issue == 'WARTEN' self.issue = '' end
+          if size(cached) == 31 store.set('_rows', self.rows) end
+        end
+      end
+    end
+  end
+
+  def valid_row(r)
+    return isinstance(r, list) && size(r) == 7 && type(r[0]) == 'string' && type(r[1]) == 'int' && (type(r[2]) == 'int' || type(r[2]) == 'real') && type(r[3]) == 'int' && type(r[4]) == 'int' && type(r[5]) == 'bool' && type(r[6]) == 'bool'
+  end
+
+  def restore_deadline()
+    var now = epoch_ms()
+    if now <= 0 return end
+    var remaining = 0
+    var due = store.get('_retry', 0)
+    if store.get('_vin', '') == self.vin && (type(due) == 'int' || type(due) == 'real')
+      remaining = int(clamp(due - now / 1000, 0, 86400))
+    end
+    self.deadline = now_ms() + remaining * 1000
+    self.clock_ready = true
+  end
+
+  def setup()
+    shared.set('ready', false)
+    shared.set('schema', 1)
+    shared.set('revision', self.revision)
+    shared.set('vin', self.vin)
+    shared.set('demo', self.demo)
+    if self.demo && !self.blocked
+      self.on_response("{\"vehicle\":{\"vin\":\"TMBDEMO0000000001\",\"charging\":{\"isVehicleInSavedLocation\":true,\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\",\"status\":{\"battery\":{\"stateOfChargeInPercent\":72,\"remainingCruisingRangeInMeters\":312000},\"state\":\"CHARGING\",\"chargeType\":\"AC\",\"chargePowerInKw\":11.0,\"chargingRateInKilometersPerHour\":58.0,\"remainingTimeToFullyChargedInMinutes\":36,\"fullyChargedAt\":\"2026-11-13T08:36:00Z\",\"plugConnectionState\":\"CONNECTED\",\"plugLockState\":\"LOCKED\"},\"settings\":{\"targetStateOfChargeInPercent\":80}},\"status\":{\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\",\"overall\":{\"locked\":\"YES\",\"doorsLocked\":\"YES\",\"doors\":\"CLOSED\",\"windows\":\"CLOSED\",\"lights\":\"OFF\"},\"detail\":{\"sunroof\":\"CLOSED\",\"trunk\":\"CLOSED\",\"bonnet\":\"CLOSED\"}},\"odometer\":{\"mileageInKm\":12845,\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\"},\"airConditioning\":{\"state\":\"HEATING\",\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\",\"targetTemperature\":{\"value\":22,\"unit\":\"CELSIUS\"},\"windowHeating\":{\"front\":\"ON\",\"rear\":\"OFF\"}},\"fuelStatus\":{\"carType\":\"DIESEL\",\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\",\"totalRangeInKm\":640,\"adBlueRange\":5200,\"primaryEngineRange\":{\"engineType\":\"DIESEL\",\"currentFuelLevelInPercent\":68,\"remainingRangeInKm\":640}},\"parkingPosition\":{\"state\":\"PARKED\"},\"auxiliaryHeating\":{\"state\":\"HEATING_AUXILIARY\",\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\"},\"activeVentilation\":{\"state\":\"VENTILATION\",\"carCapturedTimestamp\":\"2026-11-13T08:00:00Z\"}},\"errors\":[]}", 200)
+    elif self.seen
+      self.publish_rows()
+    end
+    self.loop()
+  end
+
+  def publish_status()
+    # Nur dieses Heartbeat beschreibt die Aktivitaet des Providers, keine Datenfrische.
+    shared.set('alive', true)
+    var problem = self.seen && !self.published
+    shared.set('issue', problem ? 'SHARED?' : self.issue)
+    shared.set('issue_color', problem ? 0xFFBC55 : self.issue_color)
+  end
+
+  def publish_rows()
+    self.published = false
+    if !shared.set('ready', false) return false end
+    for i : 0 .. 26
+      if !shared.set('row_' + self.specs[i][0], json.dump(self.rows[i])) return false end
+    end
+    if !shared.set('schema', 1) || !shared.set('vin', self.vin) || !shared.set('fetch_epoch', self.fetch_epoch) || !shared.set('demo', self.demo) || !shared.set('issue', self.issue) || !shared.set('issue_color', self.issue_color) return false end
+    self.revision += 1
+    store.set('_revision', self.revision)
+    # Revision ist der letzte Commit. Sie steigt auch nach schnellem Provider-Neustart.
+    if !shared.set('ready', true) || !shared.set('revision', self.revision) return false end
+    self.published = true
+    self.publish_status()
+    gc.collect()
+    return true
+  end
+
+  def later(seconds)
+    self.deadline = now_ms() + seconds * 1000
+    var now = epoch_ms()
+    if now > 0
+      store.set('_retry', now / 1000 + seconds)
+      store.set('_vin', self.vin)
+    end
+  end
+
+  def loop()
+    if self.seen && !self.published self.publish_rows() end
+    if !self.demo && !self.blocked
+      if !(size(self.key) > 0)
+        self.issue = 'API-KEY'
+        self.issue_color = 0xFFBC55
+      else
+        if !self.clock_ready self.restore_deadline() end
+        if !self.clock_ready
+          self.issue = 'ZEIT?'
+          self.issue_color = 0xFFBC55
+        elif !self.busy && now_ms() >= self.deadline
+          self.busy = true
+          # Vor der Anfrage persistieren: weitere Anzeigen und Saves pollen nicht neu.
+          self.later(self.interval)
+          var request = http.get(self.url, / body, status -> self.on_response(body, status),
+            {'headers':{'X-API-Key':self.key, 'Accept':'application/json'}, 'cap':8192, 'timeout':15})
+          if request == nil
+            self.busy = false
+            self.issue = 'OFFLINE'
+            self.issue_color = 0xFFBC55
+          end
+        elif self.seen && (self.issue == 'API-KEY' || self.issue == 'ZEIT?' || self.issue == 'WARTEN' || self.issue == 'LADEN')
+          self.issue = ''
+        end
+      end
+    end
+    self.publish_status()
+  end
+
+  def path(obj, path)
+    var value = obj
+    for key : string.split(path, '.')
+      if !isinstance(value, map) return nil end
+      value = value.find(key)
+    end
+    return value
+  end
+
+  # RFC3339 Fahrzeugzeit, unabhaengig von der Zeitzone der Uhr.
+  def stamp(s)
+    if type(s) != 'string' || size(s) < 20 return -1 end
+    if re.search('^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][Tt][0-9][0-9]:[0-9][0-9]:[0-9][0-9]([.][0-9]+)?([Zz]|[+-][0-9][0-9]:[0-9][0-9])$',s) == nil return -1 end
+    try
+      var y = int(s[0..3]), m = int(s[5..6]), d = int(s[8..9])
+      var hh = int(s[11..12]), mm = int(s[14..15]), ss = int(s[17..18])
+      if y == nil || m == nil || d == nil || hh == nil || mm == nil || ss == nil return -1 end
+      if y < 1970 || y > 2200 || m < 1 || m > 12 || d < 1 || d > 31 || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 60 return -1 end
+      var leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+      var monthdays = [31,leap ? 29 : 28,31,30,31,30,31,31,30,31,30,31]
+      if d > monthdays[m-1] return -1 end
+      var offsets = [0,31,59,90,120,151,181,212,243,273,304,334]
+      var prior = y-1
+      var days = (y-1970)*365 + prior/4-1969/4 - prior/100+1969/100 + prior/400-1969/400 + offsets[m-1]+d-1
+      if m > 2 && leap days += 1 end
+      var zone = 0
+      if s[-1..-1] != 'Z' && s[-1..-1] != 'z'
+        var z = s[-6..-1]
+        if (z[0..0] != '+' && z[0..0] != '-') || z[3..3] != ':' return -1 end
+        var zh = int(z[1..2]), zm = int(z[4..5])
+        if zh == nil || zm == nil || zh < 0 || zh > 23 || zm < 0 || zm > 59 return -1 end
+        zone = (zh*60+zm)*60
+        if z[0..0] == '-' zone = -zone end
+      end
+      return days*86400 + hh*3600 + mm*60 + ss - zone
+    except ..
+      return -1
+    end
+  end
+
+  def row(vehicle, spec)
+    var unknown = self.empty
+    var section = vehicle.find(spec[3])
+    if !isinstance(section, map) return unknown end
+    var v = self.path(section, spec[4])
+    var captured = self.stamp(section.find('carCapturedTimestamp'))
+    if self.demo captured = epoch_ms() / 1000 - 240 end
+    var f = spec[5]
+    var color = self.accent
+    var progress = -1
+    var animation = 0
+    var accent = true
+    var label = '--'
+    var dictionary = self.words.find(f)
+    if dictionary != nil
+      if type(v) != 'string' return unknown end
+      var entry = dictionary.find(v)
+      if entry == nil return unknown end
+      label = entry[0]
+      color = [self.accent,0x62CFFF,0xFFBC55,0xFF5B6B][entry[1]]
+      accent = entry[1] == 0
+      animation = entry[2]
+    else
+      if f == 'fuel'
+        v = nil
+        for name : ['primaryEngineRange','secondaryEngineRange']
+          var engine = section.find(name)
+          if isinstance(engine, map)
+            var kind = engine.find('engineType', '')
+            if kind == 'GASOLINE' || kind == 'DIESEL' || kind == 'CNG' || kind == 'LPG'
+              var level = engine.find('currentFuelLevelInPercent')
+              if (type(level) == 'int' || type(level) == 'real') && level >= 0 && level <= 100
+                v = level
+                break
+              end
+            end
+          end
+        end
+      end
+      if type(v) != 'int' && type(v) != 'real' return unknown end
+      if v != v || v > 999999999 || v < 0 return unknown end
+      if f == 'percent' || f == 'fuel'
+        if v > 100 return unknown end
+        label = str(int(v+0.5)) + '%'
+        progress = v
+        if spec[0] == 'battery' || f == 'fuel'
+          if v <= 20 color = 0xFF5B6B accent = false
+          elif v <= 40 color = 0xFFBC55 accent = false end
+        end
+        if spec[0] == 'battery' && self.path(section, 'status.state') == 'CHARGING' animation = 1 end
+      elif f == 'meters'
+        label = str(int(v/1000.0+0.5)) + 'km'
+        color = 0x62CFFF
+        accent = false
+        animation = 3
+      elif f == 'power'
+        label = (v < 100 && v != int(v) ? string.format('%.1f', v) : str(int(v+0.5))) + 'kW'
+        color = 0xFFBC55
+        accent = false
+        if self.path(section, 'status.state') == 'CHARGING' animation = 1 end
+      elif f == 'speed'
+        label = str(int(v+0.5)) + 'km/h'
+        color = 0x62CFFF
+        accent = false
+        if self.path(section, 'status.state') == 'CHARGING' animation = 3 end
+      elif f == 'minutes'
+        v = int(v)
+        label = v < 60 ? str(v)+'m' : str(v/60)+'h'+string.format('%02d',v%60)
+        color = 0xFFBC55
+        accent = false
+      elif f == 'temperature'
+        var unit = self.path(section, 'targetTemperature.unit')
+        if unit == 'FAHRENHEIT' v = (v-32)*5.0/9
+        elif unit != 'CELSIUS' return unknown end
+        if v < 5 || v > 45 return unknown end
+        label = (v != int(v) ? string.format('%.1f',v) : str(int(v))) + '°C'
+        color = 0x62CFFF
+        accent = false
+      else
+        label = str(int(v+0.5)) + 'km'
+        color = 0x62CFFF
+        accent = false
+      end
+    end
+    return [label,color,progress,animation,captured,true,accent]
+  end
+
+  def on_response(body, status)
+    self.busy = false
+    if status != 200 || body == nil
+      self.issue_color = 0xFFBC55
+      if status == 401
+        self.issue = 'KEY 401'
+      elif status == 403
+        self.issue = 'KEY 403'
+      elif status == 400 || status == 404
+        self.issue = 'VIN ' + str(status)
+        self.blocked = true
+      elif status == 429
+        self.issue = 'LIMIT'
+        self.later(max(3600,self.interval))
+      elif status == 0
+        self.issue = 'OFFLINE'
+      else
+        self.issue = 'API ' + str(status)
+      end
+      self.publish_status()
+      return
+    end
+    try
+      var data = json.load(body)
+      body = nil
+      if !isinstance(data, map) raise 'value_error', 'response' end
+      var vehicle = data.find('vehicle')
+      if !isinstance(vehicle, map) raise 'value_error', 'vehicle' end
+      if !self.demo && vehicle.find('vin') != self.vin raise 'value_error', 'vin' end
+      var fresh = []
+      for s : self.specs
+        fresh.push(self.row(vehicle, s))
+      end
+      self.rows = fresh
+      data = nil
+      vehicle = nil
+      fresh = nil
+      gc.collect()
+      self.seen = true
+      self.issue = ''
+      var now = epoch_ms()
+      self.fetch_epoch = now > 0 ? now / 1000 : -1
+      if !self.demo
+        store.set('_rows', self.rows)
+        store.set('_cache_vin', self.vin)
+        store.set('_fetch_epoch', self.fetch_epoch)
+      end
+      self.publish_rows()
+    except ..
+      self.issue = 'DATEN?'
+      self.issue_color = 0xFFBC55
+    end
+    self.publish_status()
+  end
+end
+
+return SkodaData()
