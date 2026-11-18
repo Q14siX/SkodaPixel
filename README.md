@@ -35,7 +35,7 @@ Je nach Fahrzeug und tatsächlich bereitgestellten API-Daten stehen unter andere
 
 1. **[Installationsassistent öffnen](https://q14six.github.io/SkodaPixel/).** Die Uhrensuche startet erst mit dem Klick auf **„Uhren suchen“**. Voreingestellt ist `192.168.178.0/24`; du kannst den Bereich ändern oder eine Uhr über ihre IP-Adresse ergänzen.
 2. **Eine oder mehrere Uhren auswählen.** Der Assistent prüft die Verbindung und erkennt **TC001 oder TC002 automatisch**. Eine Anmeldeseite erscheint nur für Uhren, die Zugangsdaten benötigen.
-3. **Fahrzeug und Anzeigen konfigurieren.** Trage VIN und API-Key ein, wähle pro Uhr die gewünschten Informationen und lege das Abfrageintervall fest. **Standard sind 60 Minuten**; der Wert ist änderbar.
+3. **Fahrzeug und Anzeigen konfigurieren.** Trage VIN und API-Key ein, wähle pro Uhr die gewünschten Informationen und lege das Abfrageintervall fest. **Standard sind 60 Minuten**; der Wert ist änderbar. Mit **„Orangene Statuspunkte anzeigen“** kannst du die Pixel-Warnhinweise vollständig ausblenden. Fehlertexte bleiben erhalten.
 4. **Zusammenfassung kontrollieren und Installation starten.** Der Assistent installiert die passenden Komponenten und Einzelanzeigen auf allen ausgewählten Uhren. Bereits installierte Komponenten können auf diesem Weg auch aktualisiert werden. Jede Uhr erhält eine separate Ergebnisanzeige.
 
 Bei erfolgreicher Installation erscheint **„Installation erfolgreich!“**. Danach übernimmt die Uhr die Anzeige im normalen AWTRIX-App-Wechsel.
@@ -72,7 +72,7 @@ You need a TC001 or TC002 running AWTRIX NG, access to the clock from your brows
 
 1. **[Open the installation wizard](https://q14six.github.io/SkodaPixel/).** Click **“Uhren suchen”** to start discovery manually. The default range is `192.168.178.0/24`; edit it or enter an IP address if needed.
 2. **Select one or more clocks.** The wizard checks connections automatically, identifies the TC001/TC002 model, and requests a username and password only for protected devices.
-3. **Choose vehicle settings and displays.** Enter the VIN and API key, select a single vehicle value for each display app, and adjust the fetch interval. **The default is 60 minutes.**
+3. **Choose vehicle settings and displays.** Enter the VIN and API key, select a single vehicle value for each display app, and adjust the fetch interval. **The default is 60 minutes.** Disable **“Orangene Statuspunkte anzeigen”** to hide the orange status pixels while keeping error messages available.
 4. **Review and confirm installation.** The matching components are installed or updated on the selected clocks, with an individual completion status for each device.
 
 PNG previews used by the installer: [`TC001 previews`](media/TC001/) · [`TC002 previews`](media/TC002/). Animated GIF examples are distributed separately in the full ZIP archive under the top-level `media/` directory.

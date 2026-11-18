@@ -2,7 +2,7 @@
 # @desc Gemeinsame Skoda-Daten fuer alle Pixel-Anzeigen auf dieser Uhr.
 # @headless true
 # @author Q14siX
-# @version 20261113.234847
+# @version 20261118.200343
 # @display 32x8
 # @config vin text "Fahrgestellnummer (VIN)" maxlen=17 group="Verbindung"
 # @config poll number "Abrufintervall je Uhr" default=60 min=10 max=1440 unit=min group="Verbindung"

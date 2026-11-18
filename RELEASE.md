@@ -4,6 +4,8 @@
 
 ## Deutsch
 
+**Update '+VER+':** Orangene Statuspunkte für veraltete Daten, Abfragefehler und unbekanntes Datenalter können jetzt im Installer und in den AWTRIX-App-Einstellungen deaktiviert werden (TC001/TC002). Die Prüfung der Daten und echte Fehlermeldungen bleiben erhalten. Die Auswahl wird in der Installer-Konfigurationsdatei gespeichert.
+
 **Installer-Korrektur:** Die Uhrensuche startet nicht mehr beim Öffnen der Webseite, sondern ausschließlich auf ausdrückliche Benutzeraktion. Die erste Seite zeigt den tatsächlichen Suchstatus.
 
 **Erste öffentliche Veröffentlichung von Skoda Pixel für Ulanzi TC001 und TC002 mit AWTRIX NG.**
@@ -30,6 +32,8 @@ Die vollständige Einrichtung und wichtige Sicherheitshinweise findest du in der
 ---
 
 ## English
+
+**Update '+VER+':** Orange status pixels for stale data, API failures and unknown timestamps can now be switched off in the installer or AWTRIX app settings (TC001/TC002). Data checks and actual error messages remain active. The option is retained in installer configuration files.
 
 **Installer fix:** No local network scan runs when the page loads; discovery begins only after an explicit user action. The initial status correctly reflects the idle state.
 

@@ -2,7 +2,7 @@
 # @desc Gemeinsamer Zeichencode fuer mehrere Skoda-Pixel-Anzeigen.
 # @module SkodaPixelCoreTC002
 # @author Q14siX
-# @version 20261113.234847
+# @version 20261118.200343
 # @display 52x16
 
 import json
@@ -10,7 +10,7 @@ import json
 class SkodaPixel
   var spec, row, seen, started, source, row_key, revision
   var issue, issue_color, source_error, demo, local_demo, animate, fetch_epoch
-  var stale_minutes, stale, age_unknown, value, heading, ink, bar, motion, glyph, accent, empty
+  var stale_minutes, show_status_markers, stale, age_unknown, value, heading, ink, bar, motion, glyph, accent, empty
   var brand_pixels, brand_small, full_width, value_font, value_width
 
   def init()
@@ -23,6 +23,7 @@ class SkodaPixel
     self.demo = self.local_demo
     self.animate = store.get('animation',true)
     self.stale_minutes = int(clamp(store.get('stale',60),10,1440))
+    self.show_status_markers = store.get('show_status_markers',true) != false
     self.empty = ['--',0x758590,-1,0,-1,false,false]
     self.row = self.empty
     self.source = store.get('source','SkodaData')
@@ -251,16 +252,18 @@ class SkodaPixel
       var fill = int(34*self.bar/100+0.5)
       if fill > 0 line(17,15,17+fill-1,15,self.ink) end
     end
-    if self.stale
-      for x : 17 .. 50
-        if x%2 == 0 pixel(x,15,0xFFBC55) end
+    if self.show_status_markers
+      if self.stale
+        for x : 17 .. 50
+          if x%2 == 0 pixel(x,15,0xFFBC55) end
+        end
       end
+      if self.source_error
+        pixel(49,15,0xFFBC55)
+        pixel(50,15,0xFFBC55)
+      end
+      if self.age_unknown pixel(51,15,0xFFBC55) end
     end
-    if self.source_error
-      pixel(49,15,0xFFBC55)
-      pixel(50,15,0xFFBC55)
-    end
-    if self.age_unknown pixel(51,15,0xFFBC55) end
   end
 end
 

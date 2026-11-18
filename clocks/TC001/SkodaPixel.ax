@@ -2,7 +2,7 @@
 # @desc Ein fester Fahrzeugwert aus dem gemeinsamen SkodaData-Speicher.
 # @requires SkodaData
 # @author Q14siX
-# @version 20261113.234847
+# @version 20261118.200343
 # @display 32x8
 # @requires SkodaPixelCoreTC001
 # @config source text "Datenquelle (Installationsname)" default=SkodaData maxlen=32 group="Verbindung"
@@ -10,6 +10,7 @@
 # @config animation bool "Animationen" default=true group="Darstellung"
 # @config accent color "Akzentfarbe" default=#78F5A6 group="Darstellung"
 # @config stale number "Alte Fahrzeugdaten markieren ab" default=60 min=10 max=1440 unit=min group="Darstellung"
+# @config show_status_markers bool "Orangene Statuspunkte anzeigen" default=true group="Darstellung"
 # @config demo bool "Vorschau mit Beispieldaten" default=false group="Vorschau"
 
 import SkodaPixelCoreTC001
